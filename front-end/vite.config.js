@@ -14,8 +14,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'https://appstore.api.lazycat.cloud',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        changeOrigin: true
       }
     }
   }
