@@ -64,7 +64,11 @@
         border
         stripe
         height="600"
-        :scroll-y="scrollConfig"
+        :scroll-y="{
+          enabled: true,
+          gt: 30,
+          oSize: 6
+        }"
         :row-config="{ isHover: true }"
         :border-config="{ showHeaderOverflow: true, showOverflow: true }"
         :sort-config="{ trigger: 'cell', remote: false }"
@@ -131,14 +135,6 @@ const selectedCategory = ref('')
 const platformFilter = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
-
-// 虚拟滚动配置
-const scrollConfig = {
-  enabled: true, // 启用虚拟滚动
-  gt: 30, // 当数据超过 30 条时启用
-  oSize: 6, // 缓冲区域的数据条数
-  scrollToTopOnChange: true // 当数据变化时滚动到顶部
-}
 
 // 获取所有分类
 const allCategories = computed(() => {

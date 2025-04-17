@@ -4,7 +4,7 @@
       <el-button 
         type="primary" 
         :loading="loading" 
-        @click="handleSyncData"
+        @click="syncApps"
         size="small"
       >
         <el-icon><Refresh /></el-icon>
@@ -13,18 +13,21 @@
     </div>
 
     <!-- 加载状态 -->
-    <div v-if="loading" class="loading-container">
-      <el-empty :image-size="64" description="数据加载中..." />
+    <div v-if="loading" class="loading-state">
+      <el-skeleton :rows="5" animated />
     </div>
 
     <!-- 错误状态 -->
-    <div v-else-if="storeError" class="error-container">
-      <el-empty :image-size="64" description="数据加载失败，请重试" />
-    </div>
-
-    <!-- 空数据状态 -->
-    <div v-else-if="!apps?.length" class="empty-container">
-      <el-empty :image-size="64" description="暂无数据" />
+    <div v-else-if="error" class="error-state">
+      <el-result
+        icon="error"
+        title="加载失败"
+        :sub-title="error"
+      >
+        <template #extra>
+          <el-button type="primary" @click="syncApps">重试</el-button>
+        </template>
+      </el-result>
     </div>
 
     <!-- 图表展示 -->
@@ -93,18 +96,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useAppStore } from '@/stores/appStore'
 import { storeToRefs } from 'pinia'
 import * as echarts from 'echarts'
 import { InfoFilled, Refresh } from '@element-plus/icons-vue'
 import { throttle } from 'lodash-es'
-import { ElMessage } from 'element-plus'
 
 const appStore = useAppStore()
-const { apps } = storeToRefs(appStore)
-const loading = computed(() => appStore.loading)
-const storeError = computed(() => appStore.error)
+const { apps, loading, error } = storeToRefs(appStore)
+const { syncApps } = appStore
 
 // 图表引用
 const developerChart = ref(null)
@@ -117,45 +118,6 @@ let developerChartInstance = null
 let dailyChartInstance = null
 let categoryChartInstance = null
 let platformChartInstance = null
-
-// 缓存计算结果
-const statsCache = ref({
-  developer: null,
-  daily: null,
-  category: null,
-  platform: null
-})
-
-// 同步数据
-const handleSyncData = async () => {
-  try {
-    await appStore.syncApps()
-    if (apps.value?.length > 0) {
-      await nextTick()
-      initCharts()
-    }
-  } catch (error) {
-    console.error('同步数据失败:', error)
-  }
-}
-
-// 处理开发者数据
-const processDeveloperData = (apps) => {
-  if (!apps?.length) return []
-  
-  // 使用 Map 来提高性能
-  const devMap = new Map()
-  for (const app of apps) {
-    if (app.creator) {
-      devMap.set(app.creator, (devMap.get(app.creator) || 0) + 1)
-    }
-  }
-  
-  // 转换为数组并排序
-  return Array.from(devMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 20) // 只显示前20名开发者
-}
 
 // 初始化图表的基础配置
 const initChartBase = (chartRef) => {
@@ -172,22 +134,23 @@ const initChartBase = (chartRef) => {
 
 // 初始化开发者统计图表
 const initDeveloperChart = () => {
-  if (!developerChart.value) return
+  if (!developerChart.value || !apps.value?.length) return
 
-  // 如果已经初始化过，先销毁
-  if (developerChartInstance) {
-    developerChartInstance.dispose()
+  developerChartInstance = initChartBase(developerChart)
+  if (!developerChartInstance) return
+
+  // 统计开发者数据
+  const devMap = new Map()
+  for (const app of apps.value) {
+    if (app.creator) {
+      devMap.set(app.creator, (devMap.get(app.creator) || 0) + 1)
+    }
   }
 
-  developerChartInstance = echarts.init(developerChart.value)
-  
-  // 使用缓存的数据或重新处理
-  if (!statsCache.value.developer) {
-    statsCache.value.developer = processDeveloperData(apps.value)
-  }
-  const data = statsCache.value.developer
-
-  if (!data?.length) return
+  // 转换为数组并排序
+  const data = Array.from(devMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20) // 只显示前20名开发者
 
   const option = {
     tooltip: {
@@ -225,9 +188,7 @@ const initDeveloperChart = () => {
         data: data.map(([, count]) => count),
         itemStyle: {
           color: '#409EFF'
-        },
-        large: true,
-        largeThreshold: 100
+        }
       }
     ]
   }
@@ -237,7 +198,7 @@ const initDeveloperChart = () => {
 
 // 初始化每日上架统计图表
 const initDailyChart = () => {
-  if (!dailyChart.value) return
+  if (!dailyChart.value || !apps.value?.length) return
 
   dailyChartInstance = initChartBase(dailyChart)
   if (!dailyChartInstance) return
@@ -301,7 +262,7 @@ const initDailyChart = () => {
 
 // 初始化分类统计图表
 const initCategoryChart = () => {
-  if (!categoryChart.value) return
+  if (!categoryChart.value || !apps.value?.length) return
 
   categoryChartInstance = initChartBase(categoryChart)
   if (!categoryChartInstance) return
@@ -328,7 +289,8 @@ const initCategoryChart = () => {
     legend: {
       orient: 'vertical',
       right: 10,
-      top: 'center'
+      top: 'center',
+      type: 'scroll'
     },
     series: [
       {
@@ -352,7 +314,7 @@ const initCategoryChart = () => {
 
 // 初始化平台支持统计图表
 const initPlatformChart = () => {
-  if (!platformChart.value) return
+  if (!platformChart.value || !apps.value?.length) return
 
   platformChartInstance = initChartBase(platformChart)
   if (!platformChartInstance) return
@@ -434,16 +396,8 @@ const handleResize = throttle(() => {
 }, 200)
 
 // 初始化所有图表
-const initCharts = throttle(() => {
+const initCharts = () => {
   if (!apps.value?.length) return
-  
-  // 清除缓存
-  statsCache.value = {
-    developer: null,
-    daily: null,
-    category: null,
-    platform: null
-  }
   
   // 使用 requestAnimationFrame 优化渲染
   requestAnimationFrame(() => {
@@ -452,56 +406,31 @@ const initCharts = throttle(() => {
     initCategoryChart()
     initPlatformChart()
   })
-}, 300)
+}
 
 // 监听数据变化
-watch(() => apps.value, (newApps) => {
-  if (newApps?.length) {
-    initCharts()
-  }
+watch(() => apps.value, () => {
+  initCharts()
 }, { deep: true })
 
 onMounted(async () => {
-  try {
-    if (!appStore.hasInitialLoad) {
-      await appStore.syncApps()
-      appStore.setInitialLoad()
-      if (apps.value?.length > 0) {
-        await nextTick()
-        initCharts()
-      }
-    } else if (apps.value?.length) {
-      await nextTick()
-      initCharts()
-    }
-  } catch (error) {
-    console.error('初始化失败:', error)
-  }
-  
+  await syncApps()
   window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  // 销毁图表实例
   developerChartInstance?.dispose()
   dailyChartInstance?.dispose()
   categoryChartInstance?.dispose()
   platformChartInstance?.dispose()
-  
-  // 清除缓存
-  statsCache.value = {
-    developer: null,
-    daily: null,
-    category: null,
-    platform: null
-  }
 })
 </script>
 
 <style scoped>
 .statistics-container {
   padding: 20px;
-  min-height: 400px;
 }
 
 .header-actions {
@@ -510,13 +439,9 @@ onUnmounted(() => {
   justify-content: flex-end;
 }
 
-.loading-container,
-.error-container,
-.empty-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 400px;
+.loading-state,
+.error-state {
+  padding: 40px;
 }
 
 .chart-card {
@@ -526,7 +451,7 @@ onUnmounted(() => {
 .card-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
 }
 
 .chart {
@@ -534,6 +459,7 @@ onUnmounted(() => {
 }
 
 :deep(.el-card__header) {
-  padding: 10px 20px;
+  padding: 15px 20px;
+  border-bottom: 1px solid #ebeef5;
 }
 </style> 
